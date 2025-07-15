@@ -3,7 +3,33 @@ set -e # 任何命令失败时立即退出脚本
 
 echo "🚀 Claude Code 安装与配置脚本"
 
+# --- 全局变量用于存储 Shell 配置文件路径 ---
+# 在脚本结束时用于提示用户 source 命令
+SHELL_RC_FILE=""
+
 # --- 函数定义 ---
+
+# 函数：获取用户的 Shell 配置文件路径
+get_shell_rc_file() {
+    local current_shell=$(basename "$SHELL")
+    case "$current_shell" in
+        bash)
+            echo "$HOME/.bashrc"
+            ;;
+        zsh)
+            echo "$HOME/.zshrc"
+            ;;
+        fish)
+            # Fish shell uses config.fish, and it sources it automatically
+            # but for consistency in message, we still list it.
+            echo "$HOME/.config/fish/config.fish"
+            ;;
+        *)
+            # Fallback for other shells or if SHELL is not set properly
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
 
 # 函数：检查并安装 Node.js (使用 nvm)
 install_nodejs() {
@@ -30,7 +56,9 @@ install_nodejs() {
                 echo "NVM 文件夹已存在，跳过下载，尝试加载 NVM..."
             else
                 echo "📥 下载并安装 nvm..."
-                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+                # Use --no-installation-profile to prevent it from modifying .bashrc/.zshrc during install
+                # We handle source manually here and in the final message.
+                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash --no-installation-profile
             fi
 
             # 确保 nvm 已加载，即使脚本非交互式运行
@@ -83,6 +111,7 @@ install_claude_code() {
 # 函数：配置 Claude Code 跳过首次启动向导
 skip_onboarding() {
     echo "⚙️ 配置 Claude Code 跳过首次启动向导..."
+    # Explicitly require modules for robustness, even if node --eval can sometimes infer
     node_script='
         const os = require("os");
         const path = require("path");
@@ -115,7 +144,8 @@ configure_settings_json_self_deployed() {
     fi
 
     # 定义自部署服务的API信息
-    SELF_DEPLOYED_API_KEY="sk-jn0fhoMxvA8bk2SWPLgeolqAXriBPIc8" # 这是一个占位符key
+    # 这是一个占位符key，请根据您的实际自部署服务修改
+    SELF_DEPLOYED_API_KEY="sk-jn0fhoMxvA8bk2SWPLgeolqAXriBPIc8"
     SELF_DEPLOYED_BASE_URL="https://code.fkclaude.com/api"
 
     if [ -f "$SETTINGS_FILE" ]; then
@@ -149,8 +179,8 @@ settings_file = os.path.expanduser('$SETTINGS_FILE')
 try:
     with open(settings_file, 'r') as f:
         data = json.load(f)
-except json.JSONDecodeError:
-    print(f'警告: {settings_file} 不是有效的 JSON。将覆盖。')
+except (json.JSONDecodeError, FileNotFoundError):
+    print(f'警告: {settings_file} 不存在或不是有效的 JSON。将创建/覆盖。')
     data = {}
 
 if 'env' not in data:
@@ -229,37 +259,20 @@ configure_env_vars_moonshot() {
         exit 1
     fi
 
-    # 检测当前 shell 并确定 RC 文件
-    local current_shell=$(basename "$SHELL")
-    local rc_file=""
-    case "$current_shell" in
-        bash)
-            rc_file="$HOME/.bashrc"
-            ;;
-        zsh)
-            rc_file="$HOME/.zshrc"
-            ;;
-        fish)
-            rc_file="$HOME/.config/fish/config.fish"
-            ;;
-        *)
-            echo "🤔 未能识别您的 shell ($current_shell)。将尝试修改 $HOME/.profile。"
-            rc_file="$HOME/.profile"
-            ;;
-    esac
+    SHELL_RC_FILE=$(get_shell_rc_file) # 获取 Shell 配置文件路径
 
-    echo "📝 正在将环境变量添加到 $rc_file..."
+    echo "📝 正在将环境变量添加到 $SHELL_RC_FILE..."
     # 检查变量是否已存在以避免重复
-    if [ -f "$rc_file" ] && (grep -q "ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic/" "$rc_file" || grep -q "ANTHROPIC_API_KEY=" "$rc_file"); then
-        echo "⚠️ 环境变量已存在于 $rc_file 中。跳过添加以避免重复。"
-        echo "如果您需要更新 Key，请手动编辑 $rc_file 文件。"
+    if [ -f "$SHELL_RC_FILE" ] && (grep -q "ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic/" "$SHELL_RC_FILE" || grep -q "ANTHROPIC_API_KEY=" "$SHELL_RC_FILE"); then
+        echo "⚠️ 环境变量已存在于 $SHELL_RC_FILE 中。跳过添加以避免重复。"
+        echo "如果您需要更新 Key，请手动编辑 $SHELL_RC_FILE 文件。"
     else
         # 附加新条目
-        echo "" >> "$rc_file"
-        echo "# Claude Code Moonshot 环境变量" >> "$rc_file"
-        echo "export ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic/" >> "$rc_file"
-        echo "export ANTHROPIC_API_KEY=$MOONSHOT_API_KEY" >> "$rc_file"
-        echo "✅ 环境变量已添加到 $rc_file"
+        echo "" >> "$SHELL_RC_FILE"
+        echo "# Claude Code Moonshot 环境变量" >> "$SHELL_RC_FILE"
+        echo "export ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic/" >> "$SHELL_RC_FILE"
+        echo "export ANTHROPIC_API_KEY=$MOONSHOT_API_KEY" >> "$SHELL_RC_FILE"
+        echo "✅ 环境变量已添加到 $SHELL_RC_FILE"
     fi
     echo "配置完成! 环境变量已设置。"
     echo "重要: Moonshot 配置通过环境变量设置，这将覆盖 ~/.claude/settings.json 中的任何配置。"
@@ -280,15 +293,17 @@ skip_onboarding
 echo ""
 echo "--- 选择 Claude Code 的配置方式 ---"
 echo "1. 使用 ~/.claude/settings.json 配置 (适用于自部署服务或预设API Key)"
-echo "2. 使用环境变量配置 (适用于 Moonshot AI，需要您的API Key)"
+echo "2. 使用环境变量配置 (适用于 Moonshot AI，需要您的API Key，环境变量将覆盖settings.json)"
 echo ""
 read -p "请输入您的选择 (1 或 2) [默认: 1]: " config_choice
 config_choice=${config_choice:-1} # 默认选择 1
 
+CONFIG_TYPE_SELECTED="settings_json" # 标记选择了哪种配置方式
 if [[ "$config_choice" == "1" ]]; then
     configure_settings_json_self_deployed
 elif [[ "$config_choice" == "2" ]]; then
     configure_env_vars_moonshot
+    CONFIG_TYPE_SELECTED="env_vars"
 else
     echo "无效的选择 '$config_choice'。将使用默认选项 '1' (settings.json) 进行配置。"
     configure_settings_json_self_deployed
@@ -297,9 +312,26 @@ fi
 echo ""
 echo "🎉 安装和配置已完成！"
 echo ""
-echo "🚀 要使环境变量生效 (如果您选择了 Moonshot 配置)，请执行以下操作之一:"
-echo "   1. 重新启动您的终端。"
-echo "   2. 在当前终端中运行 'source $(basename "$rc_file")' 或 'source $HOME/.profile' (取决于您的shell)。"
+
+# 根据选择的配置方式，给出不同的提示
+if [[ "$CONFIG_TYPE_SELECTED" == "env_vars" ]]; then
+    FINAL_RC_FILE=$(get_shell_rc_file) # 确保获取最新的 Shell RC 文件路径
+    echo "🔄 要使环境变量生效，您需要执行以下操作之一:"
+    echo "   1. 重新启动您的终端。"
+    # For fish shell, config.fish is sourced automatically on new shell,
+    # so 'source' command is slightly different or less common.
+    if [ "$(basename "$SHELL_RC_FILE")" = "config.fish" ]; then
+        echo "   2. 对于 Fish shell，通常不需要手动 'source'，新终端会自动加载。"
+        echo "      如果需要，可以运行 'source $FINAL_RC_FILE' 或 'fish_update_completions'。"
+    else
+        echo "   2. 在当前终端中运行以下命令:"
+        echo "      source $FINAL_RC_FILE"
+    fi
+else
+    echo "配置已写入到 ~/.claude/settings.json 文件。"
+    echo "通常不需要额外的 'source' 命令。新开终端即可生效。"
+fi
+
 echo ""
 echo "✨ 然后您就可以开始使用 Claude Code 了:"
 echo "   claude"
