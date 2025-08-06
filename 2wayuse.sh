@@ -194,7 +194,7 @@ configure_settings_json_self_deployed() {
     # Define the self-deployed API info
     # This is a placeholder key, please modify according to your actual self-deployed service
     SELF_DEPLOYED_API_KEY="sk-jn0fhoMxvA8bk2SWPLgeolqAXriBPIc8"
-    SELF_DEPLOYED_BASE_URL="https://code.fkclaude.com/api"
+    SELF_DEPLOYED_BASE_URL="http://172.16.99.204:3456"
 
     if [ ! -d "$CLAUDE_DIR" ]; then
         mkdir -p "$CLAUDE_DIR"
